@@ -7,7 +7,7 @@ locals {
   private_subnets = ["10.0.3.0/24", "10.0.4.0/24"]
   intra_subnets   = ["10.0.5.0/24", "10.0.6.0/24"]
   tags = {
-    Example = balraj-cluster
+    Example = "balraj-cluster"
   }
 }
 

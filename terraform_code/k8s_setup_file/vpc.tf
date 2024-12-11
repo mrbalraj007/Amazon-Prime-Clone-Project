@@ -2,7 +2,7 @@ module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
   version = "5.13.0"
 
-  name = balraj-cluster
+  name = "balraj-cluster"
   cidr = local.vpc_cidr
 
   azs             = local.azs

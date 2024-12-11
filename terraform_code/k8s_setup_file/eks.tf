@@ -2,7 +2,7 @@ module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "19.15.1"
 
-  cluster_name                   = balraj-cluster
+  cluster_name                   = "balraj-cluster"
   cluster_endpoint_public_access = true
 
   cluster_addons = {
@@ -30,7 +30,7 @@ module "eks" {
       capacity_type  = "SPOT"
 
       tags = {
-        ExtraTag = "Panda_Node"
+        ExtraTag = "Singh_Node"
       }
     }
   }

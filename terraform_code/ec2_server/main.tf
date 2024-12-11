@@ -1,7 +1,7 @@
 terraform {
   required_providers {
     aws = {
-      source = "hashicorp/aws"
+      source  = "hashicorp/aws"
       version = "5.67.0"
     }
   }
@@ -11,253 +11,250 @@ provider "aws" {
   region = var.region_name
 }
 
-# STEP1: CREATE SG
-resource "aws_security_group" "my-sg" {
+# To Create Security Group for EC2 Instance 
+resource "aws_security_group" "ProjectSG" {
   name        = "JENKINS-SERVER-SG"
   description = "Jenkins Server Ports"
-  
-  # Port 22 is required for SSH Access
-  ingress {
-    description     = "SSH Port"
-    from_port       = 22
-    to_port         = 22
-    protocol        = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
 
-  # Port 80 is required for HTTP
-  ingress {
-    description     = "HTTP Port"
-    from_port       = 80
-    to_port         = 80
-    protocol        = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  # Port 443 is required for HTTPS
-  ingress {
-    description     = "HTTPS Port"
-    from_port       = 443
-    to_port         = 443
-    protocol        = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+  dynamic "ingress" {
+    for_each = toset([22, 25, 80, 443, 3000, 6443, 465, 27017])
+    content {
+      description = "inbound rule for port ${ingress.value}"
+      from_port   = ingress.value
+      to_port     = ingress.value
+      protocol    = "tcp"
+      cidr_blocks = ["0.0.0.0/0"]
+    }
   }
 
   # Port 2379-2380 is required for etcd-cluster
   ingress {
-    description     = "etc-cluster Port"
-    from_port       = 2379
-    to_port         = 2380
-    protocol        = "tcp"
+    description = "etc-cluster Port"
+    from_port   = 2379
+    to_port     = 2380
+    protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
-  }  
+  }
 
-  # Port 3000 is required for Grafana
   ingress {
-    description     = "NPM Port"
-    from_port       = 3000
-    to_port         = 3000
-    protocol        = "tcp"
+    description = "Custom TCP Port Range"
+    from_port   = 3000
+    to_port     = 10000
+    protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
-  }  
+  }
 
-  # Port 6443 is required for KubeAPIServer
   ingress {
-    description     = "Kube API Server"
-    from_port       = 6443
-    to_port         = 6443
-    protocol        = "tcp"
+    description = "Custom TCP Port Range 30000 to 32767"
+    from_port   = 20000
+    to_port     = 32767
+    protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
-  }  
-
-  # Port 8080 is required for Jenkins
-  ingress {
-    description     = "Jenkins Port"
-    from_port       = 8080
-    to_port         = 8080
-    protocol        = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }  
-
-  # Port 9000 is required for SonarQube
-  ingress {
-    description     = "SonarQube Port"
-    from_port       = 9000
-    to_port         = 9000
-    protocol        = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }  
-
-  # Port 9090 is required for Prometheus
-  ingress {
-    description     = "Prometheus Port"
-    from_port       = 9090
-    to_port         = 9090
-    protocol        = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }  
-
-  # Port 9100 is required for Prometheus metrics server
-  ingress {
-    description     = "Prometheus Metrics Port"
-    from_port       = 9100
-    to_port         = 9100
-    protocol        = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  } 
+  }
 
   # Port 10250-10260 is required for K8s
   ingress {
-    description     = "K8s Ports"
-    from_port       = 10250
-    to_port         = 10260
-    protocol        = "tcp"
+    description = "K8s Ports"
+    from_port   = 10250
+    to_port     = 10260
+    protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
-  }  
-
-  # Port 30000-32767 is required for NodePort
-  ingress {
-    description     = "K8s NodePort"
-    from_port       = 30000
-    to_port         = 32767
-    protocol        = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }  
+  }
 
   # Define outbound rules to allow all
   egress {
-    from_port       = 0
-    to_port         = 0
-    protocol        = "-1"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
+
+  tags = {
+    Name = "JENKINS-SVR-SG"
+  }
+
 }
 
-# STEP2: CREATE EC2 USING PEM & SG
-resource "aws_instance" "my-ec2" {
-  ami           = var.ami   
-  instance_type = var.instance_type
-  key_name      = var.key_name        
-  vpc_security_group_ids = [aws_security_group.my-sg.id]
-  
-  root_block_device {
-    volume_size = var.volume_size
+# Fetch the latest Ubuntu 24.04 LTS AMI
+data "aws_ami" "ubuntu" {
+  most_recent = true
+
+  filter {
+    name   = "name"
+    values = ["ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server*"] # For Ubuntu Instance.
   }
-  
+
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
+
+  owners = ["099720109477"] # Canonical owner ID for Ubuntu AMIs
+}
+
+# Separate EC2 Instance for Terraform with IAM Profile and Folder Copy
+resource "aws_instance" "terraform_vm" {
+  ami                    = data.aws_ami.ubuntu.id
+  key_name               = var.key_name      # Change key name as per your setup
+  instance_type          = var.instance_type # Instance type for Terraform VM t2.large
+  iam_instance_profile   = aws_iam_instance_profile.k8s_cluster_instance_profile.name
+  vpc_security_group_ids = [aws_security_group.ProjectSG.id]
+  user_data              = templatefile("./scripts/user_data_terraform.sh", {})
+
   tags = {
     Name = var.server_name
   }
-  
-    # USING REMOTE-EXEC PROVISIONER TO INSTALL PACKAGES
-  provisioner "remote-exec" {
-    # ESTABLISHING SSH CONNECTION WITH EC2
+
+  root_block_device {
+    volume_size = var.volume_size
+  }
+
+  instance_market_options {
+    market_type = "spot"
+    spot_options {
+      max_price = "0.032" # Set your maximum price for the spot instance
+    }
+  }
+
+
+  # Copy the k8s_setup_file folder after the instance is created
+  provisioner "file" {
+    source      = "../k8s_setup_file"
+    destination = "/home/ubuntu/k8s_setup_file"
+
     connection {
       type        = "ssh"
-      private_key = file("./key.pem") # replace with your key-name 
       user        = "ubuntu"
+      private_key = file("MYLABKEY.pem")
       host        = self.public_ip
     }
-
-    inline = [
-      # Install AWS CLI
-      # Ref: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
-      "sudo apt install unzip -y",
-      "curl 'https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip' -o 'awscliv2.zip'",
-      "unzip awscliv2.zip",
-      "sudo ./aws/install",
-
-      # Install Docker
-      # Ref: https://docs.docker.com/engine/install/ubuntu/#install-using-the-repository
-      "sudo apt-get update -y",
-      "sudo apt-get install -y ca-certificates curl",
-      "sudo install -m 0755 -d /etc/apt/keyrings",
-      "curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo tee /etc/apt/keyrings/docker.asc",
-      "sudo chmod a+r /etc/apt/keyrings/docker.asc",
-      "echo \"deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable\" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null",
-      "sudo apt-get update -y",
-      "sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin",
-      "sudo usermod -aG docker ubuntu",
-      "sudo chmod 777 /var/run/docker.sock",
-      "docker --version",
-
-      # Install SonarQube (as container)
-      "docker run -d --name sonar -p 9000:9000 sonarqube:lts-community",
-
-      # Install Trivy
-      # Ref: https://aquasecurity.github.io/trivy/v0.18.3/installation/
-      "sudo apt-get install -y wget apt-transport-https gnupg",
-      "wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | gpg --dearmor | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null",
-      "echo 'deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb generic main' | sudo tee -a /etc/apt/sources.list.d/trivy.list",
-      "sudo apt-get update -y",
-      "sudo apt-get install trivy -y",
-
-      # Install Kubectl
-      # Ref: https://docs.aws.amazon.com/eks/latest/userguide/install-kubectl.html#kubectl-install-update
-      "curl -O https://s3.us-west-2.amazonaws.com/amazon-eks/1.30.4/2024-09-11/bin/linux/amd64/kubectl",
-      "curl -O https://s3.us-west-2.amazonaws.com/amazon-eks/1.30.4/2024-09-11/bin/linux/amd64/kubectl.sha256",
-      "sha256sum -c kubectl.sha256",
-      "openssl sha1 -sha256 kubectl",
-      "chmod +x ./kubectl",
-      "mkdir -p $HOME/bin && cp ./kubectl $HOME/bin/kubectl && export PATH=$HOME/bin:$PATH",
-      "echo 'export PATH=$HOME/bin:$PATH' >> ~/.bashrc",
-      "sudo mv $HOME/bin/kubectl /usr/local/bin/kubectl",
-      "sudo chmod +x /usr/local/bin/kubectl",
-      "kubectl version --client",
-
-      # Install Helm
-      # Ref: https://helm.sh/docs/intro/install/
-      # Ref (for .tar.gz file): https://github.com/helm/helm/releases
-      "wget https://get.helm.sh/helm-v3.16.1-linux-amd64.tar.gz",
-      "tar -zxvf helm-v3.16.1-linux-amd64.tar.gz",
-      "sudo mv linux-amd64/helm /usr/local/bin/helm",
-      "helm version",
-
-      # Install ArgoCD
-      # Ref: https://argo-cd.readthedocs.io/en/stable/cli_installation/
-      "VERSION=$(curl -L -s https://raw.githubusercontent.com/argoproj/argo-cd/stable/VERSION)",
-      "curl -sSL -o argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/download/v$VERSION/argocd-linux-amd64",
-      "sudo install -m 555 argocd-linux-amd64 /usr/local/bin/argocd",
-      "rm argocd-linux-amd64", 
-
-      # Install Java 17
-      # Ref: https://www.rosehosting.com/blog/how-to-install-java-17-lts-on-ubuntu-20-04/
-      "sudo apt update -y",
-      "sudo apt install openjdk-17-jdk openjdk-17-jre -y",
-      "java -version",
-
-      # Install Jenkins
-      # Ref: https://www.jenkins.io/doc/book/installing/linux/#debianubuntu
-      "sudo wget -O /usr/share/keyrings/jenkins-keyring.asc https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key",
-      "echo \"deb [signed-by=/usr/share/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian-stable binary/\" | sudo tee /etc/apt/sources.list.d/jenkins.list > /dev/null",
-      "sudo apt-get update -y",
-      "sudo apt-get install -y jenkins",
-      "sudo systemctl start jenkins",
-      "sudo systemctl enable jenkins",
-
-      # Get Jenkins initial login password
-      "ip=$(curl -s ifconfig.me)",
-      "pass=$(sudo cat /var/lib/jenkins/secrets/initialAdminPassword)",
-
-      # Output
-      "echo 'Access Jenkins Server here --> http://'$ip':8080'",
-      "echo 'Jenkins Initial Password: '$pass''",
-      "echo 'Access SonarQube Server here --> http://'$ip':9000'",
-      "echo 'SonarQube Username & Password: admin'",
-    ]
   }
-}  
 
-# STEP3: GET EC2 USER NAME AND PUBLIC IP 
-output "SERVER-SSH-ACCESS" {
-  value = "ubuntu@${aws_instance.my-ec2.public_ip}"
+  # Set appropriate ownership for the copied folder
+  provisioner "remote-exec" {
+    inline = [
+      "sudo chown -R ubuntu:ubuntu /home/ubuntu/k8s_setup_file"
+    ]
+
+    connection {
+      type        = "ssh"
+      user        = "ubuntu"
+      private_key = file("MYLABKEY.pem")
+      host        = self.public_ip
+    }
+  }
 }
 
-# STEP4: GET EC2 PUBLIC IP 
-output "PUBLIC-IP" {
-  value = "${aws_instance.my-ec2.public_ip}"
+# Custom IAM Policy for EKS with full permissions
+resource "aws_iam_policy" "eks_custom_policy" {
+  name        = "eks_custom_policy"
+  description = "Custom policy for EKS operations with full permissions"
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Sid      = "VisualEditor0",
+        Effect   = "Allow",
+        Action   = "eks:*",
+        Resource = "*"
+      }
+    ]
+  })
 }
 
-# STEP5: GET EC2 PRIVATE IP 
-output "PRIVATE-IP" {
-  value = "${aws_instance.my-ec2.private_ip}"
+
+# Attach Custom EKS Policy to IAM Role
+resource "aws_iam_role_policy_attachment" "eks_custom_policy_attachment" {
+  role       = aws_iam_role.k8s_cluster_role.name
+  policy_arn = aws_iam_policy.eks_custom_policy.arn
+}
+
+# Create IAM Role
+resource "aws_iam_role" "k8s_cluster_role" {
+  name = "Role_k8s_cluster"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+# Create IAM permissions
+
+# Create Profile for EC2 
+resource "aws_iam_instance_profile" "k8s_cluster_instance_profile" {
+  name = "Role_k8s_cluster-Profile"
+  role = aws_iam_role.k8s_cluster_role.name
+}
+
+# Attach Full AmazonEKSClusterPolicy Permissions to IAM Role
+resource "aws_iam_role_policy_attachment" "eks_full_access" {
+  role       = aws_iam_role.k8s_cluster_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+}
+
+# Attach Full AmazonEKSServicePolicy Permissions to IAM Role
+resource "aws_iam_role_policy_attachment" "eksservice_full_access" {
+  role       = aws_iam_role.k8s_cluster_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSServicePolicy"
+}
+
+# Attach Full AmazonEC2ContainerRegistryReadOnly Services Permissions to IAM Role
+resource "aws_iam_role_policy_attachment" "containerreg_full_access" {
+  role       = aws_iam_role.k8s_cluster_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+}
+
+# Attach Full AmazonEKSWorkerNodePolicy Services Permissions to IAM Role
+resource "aws_iam_role_policy_attachment" "ekswork_full_access" {
+  role       = aws_iam_role.k8s_cluster_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+}
+
+# Attach Full AmazonEKS_CNI_Policy Permissions to IAM Role
+resource "aws_iam_role_policy_attachment" "ekscni_full_access" {
+  role       = aws_iam_role.k8s_cluster_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+}
+
+# Attach Full AmazonEC2FullAccess Permissions to IAM Role
+resource "aws_iam_role_policy_attachment" "ec2_full_access" {
+  role       = aws_iam_role.k8s_cluster_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2FullAccess"
+}
+
+# Attach Full IAMFullAccess Permissions to IAM Role
+resource "aws_iam_role_policy_attachment" "iam_full_access" {
+  role       = aws_iam_role.k8s_cluster_role.name
+  policy_arn = "arn:aws:iam::aws:policy/IAMFullAccess"
+}
+
+# Attach Full AmazonVPCFullAccess Permissions to IAM Role
+resource "aws_iam_role_policy_attachment" "vpc_full_access" {
+  role       = aws_iam_role.k8s_cluster_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonVPCFullAccess"
+}
+
+# Attach Full ElasticLoadBalancingFullAccess Permissions to IAM Role
+resource "aws_iam_role_policy_attachment" "elb_full_access" {
+  role       = aws_iam_role.k8s_cluster_role.name
+  policy_arn = "arn:aws:iam::aws:policy/ElasticLoadBalancingFullAccess"
+}
+
+
+
+output "terraform_vm_public_ip" {
+  value = aws_instance.terraform_vm.public_ip
+}
+
+output "terraform_vm_private_ip" {
+  value = aws_instance.terraform_vm.private_ip
 }

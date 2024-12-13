@@ -6,7 +6,7 @@ metadata:
   labels:
     app: singh-app
 spec:
-  replicas: 25
+  replicas: 05
   selector:
     matchLabels:
       app: singh-app
